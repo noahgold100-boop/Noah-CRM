@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { baseUrl, env } from "@/lib/env";
+import { baseUrl, env, missingEnv } from "@/lib/env";
 import { oauthClient, SCOPES } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  if (missingEnv().length) return NextResponse.redirect(new URL("/", req.url));
   const state = randomBytes(16).toString("hex");
   const client = oauthClient(`${baseUrl(req)}/api/auth/callback`);
   const url = client.generateAuthUrl({

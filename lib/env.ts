@@ -39,6 +39,17 @@ export const env = {
   },
 };
 
+/** Names of required settings that are missing or invalid. Empty when setup is complete. */
+export function missingEnv(): string[] {
+  const out: string[] = [];
+  for (const k of ["DATABASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ANTHROPIC_API_KEY", "CRON_SECRET"]) {
+    if (!process.env[k]) out.push(k);
+  }
+  const s = process.env.SESSION_SECRET || "";
+  if (s.length < 32) out.push(s ? "SESSION_SECRET (must be 32+ characters)" : "SESSION_SECRET");
+  return out;
+}
+
 /** Public base URL of the app. APP_URL wins; otherwise derived from the request. */
 export function baseUrl(req?: Request): string {
   if (env.appUrl) return env.appUrl;
