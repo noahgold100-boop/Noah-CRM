@@ -21,19 +21,61 @@ export function gmailClient(auth: GAuth) {
   return google.gmail({ version: "v1", auth });
 }
 
+// ---------- pacing ----------
+// Gmail allows 15,000 quota units per user per minute and rejects short bursts above ~250 units/second.
+// threads.list and threads.get cost 10 units each, so stay under 20 calls/second and 1,200 calls/minute,
+// and retry with backoff if Google still says to slow down.
+const MAX_PER_SECOND = 20;
+const MAX_PER_MINUTE = 1200;
+const recent: number[] = [];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function takeSlot() {
+  for (;;) {
+    const now = Date.now();
+    while (recent.length && now - recent[0] >= 60_000) recent.shift();
+    let lastSecond = 0;
+    for (let i = recent.length - 1; i >= 0 && now - recent[i] < 1000; i--) lastSecond++;
+    if (recent.length < MAX_PER_MINUTE && lastSecond < MAX_PER_SECOND) {
+      recent.push(now);
+      return;
+    }
+    await sleep(recent.length >= MAX_PER_MINUTE ? 60_000 - (now - recent[0]) + 50 : 100);
+  }
+}
+
+export function isRateLimited(e: any): boolean {
+  const status = e?.code ?? e?.status ?? e?.response?.status;
+  const msg = String(e?.message || "");
+  const reason = String(e?.errors?.[0]?.reason || e?.response?.data?.error?.errors?.[0]?.reason || "");
+  return status === 429 || /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(reason) || /quota exceeded|rate limit/i.test(msg);
+}
+
+async function paced<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    await takeSlot();
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isRateLimited(e) || attempt >= 5) throw e;
+      await sleep(Math.min(30_000, 2000 * 2 ** attempt) + Math.floor(Math.random() * 500));
+    }
+  }
+}
+
 export async function listThreadIds(gmail: gmail_v1.Gmail, query: string, pageToken?: string) {
-  const res = await gmail.users.threads.list({ userId: "me", q: query, maxResults: 40, pageToken });
+  const res = await paced(() => gmail.users.threads.list({ userId: "me", q: query, maxResults: 40, pageToken }));
   return { ids: (res.data.threads || []).map((t) => t.id!).filter(Boolean), nextPageToken: res.data.nextPageToken || null };
 }
 
 export async function getThreadHead(gmail: gmail_v1.Gmail, id: string) {
-  const res = await gmail.users.threads.get({ userId: "me", id, format: "minimal" });
+  const res = await paced(() => gmail.users.threads.get({ userId: "me", id, format: "minimal" }));
   const msgs = res.data.messages || [];
   return msgs[msgs.length - 1]?.id || "";
 }
 
 export async function getThread(gmail: gmail_v1.Gmail, id: string): Promise<SimpleThread> {
-  const res = await gmail.users.threads.get({ userId: "me", id, format: "full" });
+  const res = await paced(() => gmail.users.threads.get({ userId: "me", id, format: "full" }));
   const messages = (res.data.messages || []).map(simplifyMessage).sort((a, b) => a.date.getTime() - b.date.getTime());
   return {
     id,
