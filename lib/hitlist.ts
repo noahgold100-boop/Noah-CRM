@@ -105,6 +105,7 @@ Accuracy rules — follow all of them:
 - "why" is one plain sentence on why they fit HIM specifically (genre, budget, region, school, mutual contact, track record with first-timers).
 - "path_in" is the most realistic route: a mutual contact from his CRM if one plausibly exists, their representation, a festival or lab, a fellowship. Set "warm": true only when the path is through a person already in his CRM.
 - "reach_out_when" names the milestone that would make outreach credible (e.g. "after a top-tier festival selection", "once a script places on the Black List").
+- Location comes ONLY from where he is based. Where his films were shot or set says nothing about his market — never pick people because they work in a film's shooting location.
 - Write plainly. No hype.
 
 Finish with ONLY the JSON payload wrapped in <json></json>.`;
@@ -173,6 +174,12 @@ ${await crmContext()}
 
 Already on the hit list (do not repeat): ${existing.length ? existing.join(", ") : "(none)"}
 
+${
+    profile.location.trim()
+      ? `He is based in ${profile.location.trim()}. Choose people based in or regularly working in that market. Do not choose people based in other countries unless they regularly finance, buy or produce work from filmmakers based where he is.`
+      : `His location is not set. Default to people working in the US film and TV industry.`
+  }
+
 Find ${count} ${cat.ask}.
 Rank by strength of connection to him: (1) frequent collaborators of people in his CRM, (2) shared school, hometown or region, (3) track record with his genres, formats and budget range, (4) championed films from festivals or labs he is in or targeting, (5) history of buying or producing work from emerging writers and directors.
 
@@ -184,6 +191,14 @@ ${format(count)}`;
 }
 
 export type BuildState = { status: "idle" | "running" | "done"; step: number; total: number; added: number; last_built?: string; error?: string };
+
+/** Clears the list for a fresh build. Keeps anyone marked Very important or already linked to a contact. */
+export async function resetForRebuild(): Promise<BuildState> {
+  await q(`delete from hit_list where priority <> 'very_important' and contact_id is null`);
+  const s: BuildState = { status: "idle", step: 0, total: CATEGORIES.length, added: 0 };
+  await setSetting("hitlist_build", s);
+  return s;
+}
 
 /** Builds the list one category per call (keeps each request short). */
 export async function buildStep(): Promise<BuildState> {
