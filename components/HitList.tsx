@@ -31,12 +31,28 @@ export default function HitList({
   const [search, setSearch] = useState("");
   const unfinished = status.build?.status === "running";
 
-  async function build() {
+  async function rebuild() {
+    if (!confirm("Replace the hit list with a fresh search based on your current details? Anyone marked Very important stays.")) return;
     setBuilding(true);
     setErr("");
     try {
+      const r = await call<{ hits: HitEntry[] }>("/api/hitlist", "POST", { rebuild: true });
+      setHits(r.hits);
+    } catch (e: any) {
+      setErr(e.message);
+      setBuilding(false);
+      return;
+    }
+    await build(0);
+  }
+
+  async function build(fromStep?: number) {
+    setBuilding(true);
+    setErr("");
+    try {
+      const start = fromStep ?? (status.build?.status === "running" ? status.build.step : 0);
       for (let i = 0; i < 8; i++) {
-        const step = (status.build?.status === "running" ? status.build.step : 0) + i;
+        const step = start + i;
         setProgress(`Researching ${CATEGORY_LABELS[Math.min(step, 4)]} (${Math.min(step + 1, 5)} of 5). Each step takes a minute or two.`);
         const r = await call<{ state: { status: string; step: number; error?: string }; hits: HitEntry[] }>("/api/hitlist", "POST");
         setHits(r.hits);
@@ -83,7 +99,7 @@ export default function HitList({
             </button>
           </>
         ) : (
-          <button className="btn primary" disabled={building} onClick={build}>
+          <button className="btn primary" disabled={building} onClick={() => build()}>
             {building ? "Building…" : unfinished ? "Continue building" : "Build hit list"}
           </button>
         )}
@@ -100,9 +116,13 @@ export default function HitList({
     <>
       <div className="toolbar">
         <input className="field search" type="search" placeholder="Search the hit list" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search the hit list" />
-        {unfinished && (
-          <button className="btn" disabled={building} onClick={build}>
+        {unfinished ? (
+          <button className="btn" disabled={building} onClick={() => build()}>
             {building ? "Building…" : "Continue building"}
+          </button>
+        ) : (
+          <button className="btn" disabled={building} onClick={rebuild}>
+            {building ? "Building…" : "Rebuild list"}
           </button>
         )}
       </div>
